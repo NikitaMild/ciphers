@@ -16,13 +16,11 @@ class RSA(object):
         self.encryption_message = []
         self.decryption_message = ""
 
-    def session_key(self):
+    def session_key(self, block_bits):
         binary = ascii_to_bin(self.message)
         binary = str(binary)
-        if len(binary) % 8:
-            q = 8-(len(binary) % 8)
-            binary = (q+2)*'0'+binary[2:]
-        self.m = [int(binary[i:i+1024], 2) for i in range(0, len(binary), 1024)]
+        self.m = [int(binary[i:i+block_bits], 2)
+                  for i in range(0, len(binary), block_bits)]
 
     @staticmethod
     def gen_primary_number(bits, p=0):
@@ -31,13 +29,13 @@ class RSA(object):
             p = getrandbits(bits)
         return p
 
-    def __ColculationPublicExponent(self, Fi):
+    def __CalculationPublicExponent(self, Fi):
         self.e = randint(2, Fi-1)
         while gcd(self.e, Fi) != 1:
-            self.e = randint(2, Fi-1)
+            self.e = randint(2, Fi)
 
-    def __ColculationSecretExponent(self, Fi):
-        self.d = mod(xgcd(self.e, Fi)[1], Fi)
+    def __CalculationSecretExponent(self, Fi):
+        self.d = inverse_mod(self.e, Fi)
 
     def encrypt(self):
         R = IntegerModRing(self.n)
@@ -64,22 +62,23 @@ class RSA(object):
             text_file.write("{0}\n".format(self.decryption_message))
 
     def run(self):
-        self.session_key()
         try:
-            bits = int(raw_input("Please input number of bits: "))
+            bits = int(raw_input(
+                       "Please input number of bits for primary numbers: "))
+            block_bits = int(raw_input(
+                        "Please input number of bits in block: "))
         except:
             print "KOGO NAEBAT` XOCHESH?"
             return
+        self.session_key(block_bits)
         p = RSA.gen_primary_number(bits)
         q = RSA.gen_primary_number(bits)
         print "p: %s " % p
         print "q: %s" % q
         self.n = p*q
-        Fi = euler_phi(self.n)
-        self.__ColculationPublicExponent(Fi)
-        self.__ColculationSecretExponent(Fi)
-        print "PublicE: ", self.e
-        print "SecretE: ", self.d
+        Fi = (p-1)*(q-1)
+        self.__CalculationPublicExponent(Fi)
+        self.__CalculationSecretExponent(Fi)
         if mod(self.e*self.d, Fi) != 1:
             print "Bad calculations :("
             return

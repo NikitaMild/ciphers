@@ -3,88 +3,96 @@ from array import array
 from sage.crypto.util import bin_to_ascii
 from sage.crypto.util import ascii_to_bin
 
+
 class RSA(object):
+
     def __init__(self, object=None):
         self.message = object
+        self.m = []
+        self.n = 0
+        self.blocks = []
+        self.e = 0
+        self.d = 0
+        self.encryption_message = []
+        self.decryption_message = ""
 
     def session_key(self):
         binary = ascii_to_bin(self.message)
         binary = str(binary)
-        print binary
-        if len(binary)%8:
-            q = 8-(len(binary)%8)
+        if len(binary) % 8:
+            q = 8-(len(binary) % 8)
             binary = (q+2)*'0'+binary[2:]
-        bin_blocks = [binary[i:i+8] for i in range(0,len(binary),8)]
-        m = int(binary,2)
-        return m
-
-    @staticmethod
-    def __test_Ferma(number=0, rounds=128):
-        if mod(number, 2) == 0:
-            return False
-        for _ in range(rounds):
-            a = (randint(2, number-1))**(number-1)
-            if mod(a, number) != 1:
-                return False
-        return True
+        self.m = [int(binary[i:i+1024], 2) for i in range(0, len(binary), 1024)]
 
     @staticmethod
     def gen_primary_number(bits, p=0):
         p = getrandbits(bits)
-        while not RSA.__test_Ferma(p):
+        while p not in Primes():
             p = getrandbits(bits)
         return p
 
-    @staticmethod
-    def __ColculationPublicExponent(n, Fi):
-        e = randint(2, Fi-1)
-        while gcd(e, Fi) != 1:
-            e = randint(2, Fi-1)
-        return e
+    def __ColculationPublicExponent(self, Fi):
+        self.e = randint(2, Fi-1)
+        while gcd(self.e, Fi) != 1:
+            self.e = randint(2, Fi-1)
 
-    @staticmethod
-    def __ColculationSecretExponent(e, Fi):
-        return mod(xgcd(e, Fi)[1], Fi)
+    def __ColculationSecretExponent(self, Fi):
+        self.d = mod(xgcd(self.e, Fi)[1], Fi)
 
-    @staticmethod
-    def encrypt(n,m,public_key):
-        R = IntegerModRing(n)
-        return R(m**public_key[0])
+    def encrypt(self):
+        R = IntegerModRing(self.n)
+        self.encryption_message = [R(x)**R(self.e) for x in self.m]
+        string = ""
+        for x in self.encryption_message:
+            string += str(x)
+        with open("encrypt.txt", "w") as text_file:
+            text_file.write("{0}\n".format(string))
 
-    @staticmethod
-    def decrypt(n,encryption_message,private_key):
-        R = IntegerModRing(n)
-        tmp = R(encryption_message**private_key[0])
-        binary = bin(tmp)
-        q = 8-(len(binary)%8)
-        binary = (q+2)*'0'+binary[2:]
-        print "binary: %s" % binary
-        tmp = bin_to_ascii(binary)
-        return tmp
+    def decrypt(self):
+        R = IntegerModRing(self.n)
+        dec_blocks = [str(R(x)**R(self.d)) for x in self.encryption_message]
+        dec_blocks = [bin(int(block))[2:] for block in dec_blocks]
+        for i in range(len(dec_blocks)):
+            if len(dec_blocks[i]) % 8:
+                block = (8-(len(dec_blocks[i]) % 8))*"0"+dec_blocks[i]
+                dec_blocks.pop(i)
+                dec_blocks.insert(i, block)
+        dec_msg = [bin_to_ascii(x) for x in dec_blocks]
+        for x in dec_msg:
+            self.decryption_message += x
+        with open("decrypt.txt", "w") as text_file:
+            text_file.write("{0}\n".format(self.decryption_message))
 
     def run(self):
-        m = self.session_key()
-        print "m: %s" % m
-        p = RSA.gen_primary_number(8)
-        q = RSA.gen_primary_number(8)
+        self.session_key()
+        try:
+            bits = int(raw_input("Please input number of bits: "))
+        except:
+            print "KOGO NAEBAT` XOCHESH?"
+            return
+        p = RSA.gen_primary_number(bits)
+        q = RSA.gen_primary_number(bits)
         print "p: %s " % p
         print "q: %s" % q
-        n = p*q
-        Fi = euler_phi(n)
-        e = RSA.__ColculationPublicExponent(n, Fi)
-        d = RSA.__ColculationSecretExponent(e, Fi)
-        if mod(e*d, Fi) != 1:
+        self.n = p*q
+        Fi = euler_phi(self.n)
+        self.__ColculationPublicExponent(Fi)
+        self.__ColculationSecretExponent(Fi)
+        print "PublicE: ", self.e
+        print "SecretE: ", self.d
+        if mod(self.e*self.d, Fi) != 1:
             print "Bad calculations :("
             return
-        public_key = array('I', [e, n])
-        private_key = array('I', [d, n])
-        encryption_message = RSA.encrypt(n,m,public_key)
-        print "enc: {}".format(encryption_message)
-        decryption_message = RSA.decrypt(n,encryption_message,private_key)
-        print "dec: {}".format(decryption_message)
+        self.encrypt()
+        self.decrypt()
+        if self.message == self.decryption_message:
+            print "All right!"
+
 
 def main():
-    rsa = RSA("k")
+    with open('plaintext.txt', 'r') as myfile:
+        data = myfile.read().replace('\n', '')
+    rsa = RSA(data)
     rsa.run()
 
 

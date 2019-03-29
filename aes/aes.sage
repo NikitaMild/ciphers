@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from array import array
 from collections import deque
+from sage.crypto.util import bin_to_ascii
 
 Sbox = array('i',
             [0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -58,18 +59,24 @@ class AES(object):
         self.Nb = 4
         self.Nk = 4
         self.Nr = 10
-        self.msg = object
-        self.key = "kekacheburekaloh"
-        self.inputblock = matrix(SR, self.Nb, self.Nk, [ord(x) for x in self.msg]).transpose()
+        self.key = object[1]
+        self.inputblock = matrix(SR, self.Nb, self.Nk,
+                                [ord(x) for x in object[0]]).transpose()
         self.state = matrix(SR, self.Nb, 4)
-        self.outputblock = matrix(SR, self.Nb, self.Nk)
         self.inputkey = matrix(SR, 4, self.Nk, [ord(x) for x in self.key])
         self.keystorage = []
         self.roundkey = []
+        self.polynom = matrix(SR,[[2,3,1,1],
+                                  [1,2,3,1],
+                                  [1,1,2,3],
+                                  [3,1,1,2]])
+        self.Invpolynom = matrix(SR,[[0xe, 0xb, 0xd,0x9],
+                                    [0x9, 0xe, 0xb, 0xd],
+                                    [0xd, 0x9, 0xe, 0xb],
+                                    [0xb, 0xd, 0x9, 0xe]])
 
-    @staticmethod
-    def SubWord(word):
-        word = AES.RotWordLeft(word,1)
+    def SubWord(self,word):
+        word = self.RotWordLeft(word,1,None)
         for j in range(len(word)):
             sbox_row = int(word[j]) // 0x10
             sbox_col = int(word[j]) % 0x10
@@ -77,15 +84,16 @@ class AES(object):
             word[j] = sbox_elem
         return word
 
-    @staticmethod
-    def RotWordLeft(word,position):
+    def RotWordLeft(self,word,position,flag):
         q = deque(word)
-        q.rotate(-position)
+        if flag is None:
+            q.rotate(-position)
+        elif flag == 'Inv':
+            q.rotate(position)
         word = list(q)
         return word
 
-    @staticmethod
-    def xor_lists(list1, list2):
+    def xor_lists(self,list1, list2):
         xor_list = []
         for i in range(len(list1)):
             xor_list.append(int(list1[i]).__xor__(int(list2[i])))
@@ -99,42 +107,57 @@ class AES(object):
         for i in range(self.Nk, counter):
             temp = self.keystorage[i - 1]
             if not mod(i, self.Nk):
-                temp = AES.xor_lists(AES.SubWord(temp), (Rcon[i // self.Nk]))
+                temp = self.xor_lists(self.SubWord(temp), (Rcon[i // self.Nk]))
             elif self.Nk > 6 and mod(i, self.Nk) == 4:
-                temp = AES.__SubWord(temp)
-            self.keystorage.append(AES.xor_lists(self.keystorage[i - self.Nk], temp))
-        #print "self.keystorage:\n%s" % self.keystorage
-        #print "self.state:\n%s" % self.state
+                temp = self.SubWord(temp)
+            self.keystorage.append(self.xor_lists(
+                                  self.keystorage[i - self.Nk], temp))
 
     def AddRoundKey(self,number):
         counter = number *4
-        self.roundkey = matrix(SR, 4, 4, [self.keystorage[i] for i in range(counter,counter+4)])
-        #print "self.roundkey:\n%s" % self.roundkey
+        self.roundkey = matrix(SR, 4, 4, [self.keystorage[i]
+                              for i in range(counter,counter+4)]).transpose()
         tmp = []
         for i in range(4):
-            tmp.append(AES.xor_lists(list(self.state[i]), list(self.roundkey[i])))
+            tmp.append(self.xor_lists(
+                      list(self.state[i]), list(self.roundkey[i])))
         self.state = matrix(SR, 4, 4, tmp)
-        #print "self.roundkey after xor with self.state:\n%s" % self.roundkey
 
-    def SubBytes(self):
-        #print "state before:\n%s" % self.state
+    def SubBytes(self,flag=None):
+        if flag is None:
+            tmp = Sbox
+        elif flag == 'Inv':
+            tmp = InvSbox
         for i in range(self.Nb):
             for j in range(4):
-                self.state[i,j] = Sbox[self.state[i,j]]
-        #print "state after:\n%s" % self.state
+                self.state[i,j] = tmp[self.state[i,j]]
 
-    def ShiftRow(self):
+    def ShiftRow(self,flag=None):
         tmp = []
-        #print "state before:\n%s" % self.state
         for x in ((self.state[i],i) for i in range(self.Nb)):
-            tmp.append(AES.RotWordLeft(list(x[0]),x[1]))
+            tmp.append(self.RotWordLeft(list(x[0]),x[1],flag))
         self.state = matrix(SR,self.Nb,4,tmp)
-        #print "state after:\n%s" % self.state
 
-    def MixColumns(self):
-        R.<x> = PolynomialRing(GF(2), 'x')
-        S.<y> = QuotientRing(R, R.ideal(x^8+x^4+x^3+x+1))
-        #T = QuotientRing(S, S.ideal(y^4+1))
+    def MixColumns(self,flag=None):
+        if flag is None:
+            poly = self.polynom
+        elif flag == 'Inv':
+            poly = self.Invpolynom
+        tmp_matrix = []
+        q = self.state.transpose()
+        F=GF(2**8, 'x')
+        for f in range(4):
+            tmp = []
+            for i in range(self.Nb):
+                res=0
+                for j in range(4):
+                    row = [int(x) for x in bin(poly[i,j])[2:]][::-1]
+                    col = [int(x) for x in bin(q[f,j])[2:]][::-1]
+                    res += F(row)*F(col)
+                tmp.append(F(res).integer_representation())
+            tmp_matrix.append(tmp)
+        self.state = matrix(SR,tmp_matrix).transpose()
+
 
 
     def encrypt(self):
@@ -143,24 +166,43 @@ class AES(object):
                 self.state[i, j] = self.inputblock[(i + 4*j)//4, (i + 4*j) % 4]
         self.KeyExpansion()
         self.AddRoundKey(0)
+        for i in range(1, self.Nr):
+             self.SubBytes()
+             self.ShiftRow()
+             self.MixColumns()
+             self.AddRoundKey(i)
         self.SubBytes()
         self.ShiftRow()
-        self.MixColumns()
-    #    for _ in range(1, self.Nr-1):
-        #     self.SubBytes()
-        #     self.ShiftRow()
-        #     self.MixColumns()
-        #     self.AddRoundKey(_)
-        # self.SubBytes()
-        # self.ShiftRows()
-        # self.AddRoundKey()
+        self.AddRoundKey(self.Nr)
+        self.encrypt = list(self.state)
+
+    def dec_to_msg(self):
+        decrypt = ""
+        dec_msg = [str(unichr(x)) for q in self.state for x in list(q)]
+        print dec_msg
+        for x in dec_msg:
+            decrypt += x
+        print decrypt
+
+    def decrypt(self):
+        self.AddRoundKey(self.Nr)
+        for i in range(self.Nr-1,0,-1):
+            self.ShiftRow(flag='Inv')
+            self.SubBytes(flag='Inv')
+            self.AddRoundKey(i)
+            self.MixColumns(flag='Inv')
+        self.ShiftRow(flag='Inv')
+        self.SubBytes(flag='Inv')
+        self.AddRoundKey(0)
+        self.dec_to_msg()
 
     def run(self):
         self.encrypt()
-
+        self.decrypt()
 
 def main():
-    aes = AES("mytestbigmessage")
+    q = ["mytestbigmessage","kekacheburekaloh"]
+    aes = AES(q)
     aes.run()
 
 

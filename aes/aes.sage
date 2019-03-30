@@ -2,6 +2,8 @@
 from array import array
 from collections import deque
 from sage.crypto.util import bin_to_ascii
+from getpass import getpass
+from functools import wraps
 
 Sbox = array('i',
             [0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -54,6 +56,11 @@ Rcon = [
         ]
 
 
+def openfile(name):
+    f = open(name,'r')
+    print f.read()
+    return f
+
 class AES(object):
     def __init__(self, object=None):
         self.Nb = 4
@@ -75,8 +82,19 @@ class AES(object):
                                     [0xd, 0x9, 0xe, 0xb],
                                     [0xb, 0xd, 0x9, 0xe]])
 
-    def SubWord(self,word):
-        word = self.RotWordLeft(word,1,None)
+    def prettyprint(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            printf = func(*args, **kwargs)
+            print '-'*len(printf)
+            print printf
+            print '-'*len(printf)
+            return func(*args, **kwargs)
+        return wrapped
+
+    @staticmethod
+    def SubWord(word):
+        word = AES.RotWordLeft(word,1,None)
         for j in range(len(word)):
             sbox_row = int(word[j]) // 0x10
             sbox_col = int(word[j]) % 0x10
@@ -84,7 +102,8 @@ class AES(object):
             word[j] = sbox_elem
         return word
 
-    def RotWordLeft(self,word,position,flag):
+    @staticmethod
+    def RotWordLeft(word, position, flag):
         q = deque(word)
         if flag is None:
             q.rotate(-position)
@@ -107,9 +126,9 @@ class AES(object):
         for i in range(self.Nk, counter):
             temp = self.keystorage[i - 1]
             if not mod(i, self.Nk):
-                temp = self.xor_lists(self.SubWord(temp), (Rcon[i // self.Nk]))
+                temp = self.xor_lists(AES.SubWord(temp), (Rcon[i // self.Nk]))
             elif self.Nk > 6 and mod(i, self.Nk) == 4:
-                temp = self.SubWord(temp)
+                temp = AES.SubWord(temp)
             self.keystorage.append(self.xor_lists(
                                   self.keystorage[i - self.Nk], temp))
 
@@ -125,39 +144,49 @@ class AES(object):
 
     def SubBytes(self,flag=None):
         if flag is None:
-            tmp = Sbox
+            sbox = Sbox
         elif flag == 'Inv':
-            tmp = InvSbox
+            sbox = InvSbox
         for i in range(self.Nb):
             for j in range(4):
-                self.state[i,j] = tmp[self.state[i,j]]
+                self.state[i, j] = sbox[self.state[i, j]]
 
-    def ShiftRow(self,flag=None):
-        tmp = []
-        for x in ((self.state[i],i) for i in range(self.Nb)):
-            tmp.append(self.RotWordLeft(list(x[0]),x[1],flag))
-        self.state = matrix(SR,self.Nb,4,tmp)
+    def ShiftRow(self, flag=None):
+        new_state = []
+        for x in ((self.state[i], i) for i in range(self.Nb)):
+            new_state.append(AES.RotWordLeft(list(x[0]), x[1], flag))
+        self.state = matrix(SR, self.Nb, 4, new_state)
 
     def MixColumns(self,flag=None):
         if flag is None:
             poly = self.polynom
         elif flag == 'Inv':
             poly = self.Invpolynom
-        tmp_matrix = []
+        new_state = []
         q = self.state.transpose()
-        F=GF(2**8, 'x')
+        F = GF(2**8, 'x')
         for f in range(4):
-            tmp = []
+            new_state_column = []
             for i in range(self.Nb):
                 res=0
                 for j in range(4):
                     row = [int(x) for x in bin(poly[i,j])[2:]][::-1]
                     col = [int(x) for x in bin(q[f,j])[2:]][::-1]
                     res += F(row)*F(col)
-                tmp.append(F(res).integer_representation())
-            tmp_matrix.append(tmp)
-        self.state = matrix(SR,tmp_matrix).transpose()
+                new_state_column.append(F(res).integer_representation())
+            new_state.append(new_state_column)
+        self.state = matrix(SR,new_state).transpose()
 
+    @prettyprint
+    def encrypt_to_msg(self,encrypt_file):
+        #encrypt_file = raw_input("enter filename for encrypted message: ")
+        with open('encrypt.txt', 'w') as file:
+            for item in self.encrypt:
+                for x in item:
+                    file.write("%s," % x)
+            file.close()
+            printf = "you message has been decrypt into {} file".format(encrypt_file)
+            return printf
 
 
     def encrypt(self):
@@ -175,14 +204,20 @@ class AES(object):
         self.ShiftRow()
         self.AddRoundKey(self.Nr)
         self.encrypt = list(self.state)
+        self.encrypt_to_msg('encrypt.txt')
 
-    def dec_to_msg(self):
+    @prettyprint
+    def dec_to_msg(self, decrypt_file):
+        #decrypt_file = raw_input("enter filename for decrypted message: ")
         decrypt = ""
         dec_msg = [str(unichr(x)) for q in self.state for x in list(q)]
-        print dec_msg
         for x in dec_msg:
             decrypt += x
-        print decrypt
+        file = open('decrypt.txt', 'w')
+        file.write(decrypt)
+        file.close()
+        printf = "you message has been decrypt into {} file".format(decrypt_file)
+        return printf
 
     def decrypt(self):
         self.AddRoundKey(self.Nr)
@@ -194,15 +229,19 @@ class AES(object):
         self.ShiftRow(flag='Inv')
         self.SubBytes(flag='Inv')
         self.AddRoundKey(0)
-        self.dec_to_msg()
+        self.dec_to_msg('decrypt.txt')
 
     def run(self):
         self.encrypt()
         self.decrypt()
 
 def main():
-    q = ["mytestbigmessage","kekacheburekaloh"]
-    aes = AES(q)
+    #filename = raw_input("please, enter filename for encrypt: ")
+    #print "enter secret key: "
+    #key_valuve = getpass(prompt='enter secret key: ')
+    #msg = openfile(filename)
+    data_storage = ['mytestbigmessage', 'kekacheburekaloh']
+    aes = AES(data_storage)
     aes.run()
 
 

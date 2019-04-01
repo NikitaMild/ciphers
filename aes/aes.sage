@@ -4,6 +4,7 @@ from collections import deque
 from sage.crypto.util import bin_to_ascii
 from getpass import getpass
 from functools import wraps
+import hashlib
 
 Sbox = array('i',
             [0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -58,21 +59,23 @@ Rcon = [
 
 def openfile(name):
     f = open(name,'r')
-    print f.read()
-    return f
+    string = f.read()
+    return string
+
 
 class AES(object):
     def __init__(self, object=None):
         self.Nb = 4
         self.Nk = 4
         self.Nr = 10
+        self.msg = object[0]
         self.key = object[1]
-        self.inputblock = matrix(SR, self.Nb, self.Nk,
-                                [ord(x) for x in object[0]]).transpose()
         self.state = matrix(SR, self.Nb, 4)
         self.inputkey = matrix(SR, 4, self.Nk, [ord(x) for x in self.key])
         self.keystorage = []
         self.roundkey = []
+        self.decrypto = ""
+        self.padding = 0
         self.polynom = matrix(SR,[[2,3,1,1],
                                   [1,2,3,1],
                                   [1,1,2,3],
@@ -81,6 +84,7 @@ class AES(object):
                                     [0x9, 0xe, 0xb, 0xd],
                                     [0xd, 0x9, 0xe, 0xb],
                                     [0xb, 0xd, 0x9, 0xe]])
+
 
     def prettyprint(func):
         @wraps(func)
@@ -133,7 +137,7 @@ class AES(object):
                                   self.keystorage[i - self.Nk], temp))
 
     def AddRoundKey(self,number):
-        counter = number *4
+        counter = number*4
         self.roundkey = matrix(SR, 4, 4, [self.keystorage[i]
                               for i in range(counter,counter+4)]).transpose()
         tmp = []
@@ -179,68 +183,100 @@ class AES(object):
 
     @prettyprint
     def encrypt_to_msg(self,encrypt_file):
-        #encrypt_file = raw_input("enter filename for encrypted message: ")
         with open('encrypt.txt', 'w') as file:
-            for item in self.encrypt:
-                for x in item:
-                    file.write("%s," % x)
+            for string in self.encrypt:
+                for item in string:
+                    for x in item:
+                        file.write("%s," % x)
             file.close()
-            printf = "you message has been decrypt into {} file".format(encrypt_file)
+            printf = "you message has been encrypt into {} file".format(encrypt_file)
             return printf
 
+    def str_to_list_with_padding(self, string, len_sub_string):
+        self.padding = 0
+        if len(string) % len_sub_string:
+            self.padding = len_sub_string - (len(string) % len_sub_string)
+        str_to_list = [ord(x) for x in string]
+        for i in range(self.padding-1):
+            str_to_list.append(0)
+        if self.padding:
+            str_to_list.append(self.padding)
+        return str_to_list
 
     def encrypt(self):
-        for i in range(4):
-            for j in range(self.Nb):
-                self.state[i, j] = self.inputblock[(i + 4*j)//4, (i + 4*j) % 4]
-        self.KeyExpansion()
-        self.AddRoundKey(0)
-        for i in range(1, self.Nr):
-             self.SubBytes()
-             self.ShiftRow()
-             self.MixColumns()
-             self.AddRoundKey(i)
-        self.SubBytes()
-        self.ShiftRow()
-        self.AddRoundKey(self.Nr)
-        self.encrypt = list(self.state)
+        n = 16
+        msg_store = [self.msg[i:i+n] for i in range(0, len(self.msg), n)]
+        tmp = []
+        for msg in msg_store:
+            msg_list = self.str_to_list_with_padding(msg, n)
+            self.inputblock = matrix(SR, self.Nb, self.Nk, msg_list).transpose()
+            for i in range(4):
+                for j in range(self.Nb):
+                    self.state[i, j] = self.inputblock[(i + 4*j)//4, (i + 4*j) % 4]
+            self.KeyExpansion()
+            self.AddRoundKey(0)
+            for i in range(1, self.Nr):
+                 self.SubBytes()
+                 self.ShiftRow()
+                 self.MixColumns()
+                 self.AddRoundKey(i)
+            self.SubBytes()
+            self.ShiftRow()
+            self.AddRoundKey(self.Nr)
+            tmp.append(list(self.state))
+        self.encrypt = tmp
         self.encrypt_to_msg('encrypt.txt')
 
-    @prettyprint
-    def dec_to_msg(self, decrypt_file):
-        #decrypt_file = raw_input("enter filename for decrypted message: ")
-        decrypt = ""
+    def dec_to_msg(self):
         dec_msg = [str(unichr(x)) for q in self.state for x in list(q)]
         for x in dec_msg:
-            decrypt += x
+            self.decrypto += x
+
+    @prettyprint
+    def write_decrypt_msg(self, decrypt_file):
         file = open('decrypt.txt', 'w')
-        file.write(decrypt)
+        file.write(self.decrypto[:-self.padding])
         file.close()
         printf = "you message has been decrypt into {} file".format(decrypt_file)
         return printf
 
+    @staticmethod
+    def cut_to_lists(list_string):
+        main_list = []
+        for i in range(len(list_string)//16):
+            cut = slice(16*i, 16*(i+1))
+            main_list.append(list_string[cut])
+        return main_list
+
     def decrypt(self):
-        self.AddRoundKey(self.Nr)
-        for i in range(self.Nr-1,0,-1):
+        string = openfile('encrypt.txt')
+        list_string = string.split(',')[:-1]
+        main_list = AES.cut_to_lists(list_string)
+        for item in main_list:
+            self.state = matrix(SR, 4, 4, item)
+            self.AddRoundKey(self.Nr)
+            for i in range(self.Nr-1,0,-1):
+                self.ShiftRow(flag='Inv')
+                self.SubBytes(flag='Inv')
+                self.AddRoundKey(i)
+                self.MixColumns(flag='Inv')
             self.ShiftRow(flag='Inv')
             self.SubBytes(flag='Inv')
-            self.AddRoundKey(i)
-            self.MixColumns(flag='Inv')
-        self.ShiftRow(flag='Inv')
-        self.SubBytes(flag='Inv')
-        self.AddRoundKey(0)
-        self.dec_to_msg('decrypt.txt')
+            self.AddRoundKey(0)
+            self.dec_to_msg()
+        self.write_decrypt_msg('decrypt.txt')
 
     def run(self):
         self.encrypt()
         self.decrypt()
 
 def main():
-    #filename = raw_input("please, enter filename for encrypt: ")
-    #print "enter secret key: "
-    #key_valuve = getpass(prompt='enter secret key: ')
-    #msg = openfile(filename)
-    data_storage = ['mytestbigmessage', 'kekacheburekaloh']
+    filename = raw_input("please, enter filename for encrypt: ")
+    key_valuve = getpass(prompt='enter secret key: ')
+    passwd = hashlib.md5()
+    passwd.update(key_valuve)
+    msg = openfile(filename)
+    data_storage = [msg, passwd.digest()]
     aes = AES(data_storage)
     aes.run()
 
